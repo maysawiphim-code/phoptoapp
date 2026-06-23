@@ -90,14 +90,16 @@ def setup_cloudinary():
     return True
 
 
-def upload_to_cloudinary(image_bytes: bytes, filename: str, folder: str) -> str:
-    """อัพโหลดรูปขึ้น Cloudinary และคืน URL"""
+def upload_to_cloudinary(image_bytes: bytes, filename: str, num_receipts: int) -> str:
+    """อัพโหลดรูปขึ้น Cloudinary แยกโฟลเดอร์ตามจำนวนใบเสร็จ"""
+    folder_map = {1: "1_ใบเสร็จ", 2: "2_ใบเสร็จ", 3: "3_ใบเสร็จ"}
+    folder = f"ใบเสร็จ/{folder_map[num_receipts]}"
     result = cloudinary.uploader.upload(
         image_bytes,
-        folder=f"ใบเสร็จ/{folder}",
+        folder=folder,
         public_id=filename,
         resource_type="image",
-        type="private",  # private ดูได้เฉพาะเจ้าของ
+        overwrite=False,
     )
     return result.get("secure_url", "")
 
@@ -186,7 +188,7 @@ if uploaded_file:
                         buf = io.BytesIO()
                         image.save(buf, format="JPEG", quality=92)
                         filename = f"{safe_sender}_{timestamp}"
-                        url = upload_to_cloudinary(buf.getvalue(), filename, sub_folder)
+                        url = upload_to_cloudinary(buf.getvalue(), filename, num_receipts)
                         links.append((f"{filename}.jpg", url))
                     else:
                         for i in range(num_receipts):
@@ -194,7 +196,7 @@ if uploaded_file:
                             buf = io.BytesIO()
                             cropped.save(buf, format="JPEG", quality=92)
                             filename = f"{safe_sender}_{timestamp}_สวนที่{i+1}"
-                            url = upload_to_cloudinary(buf.getvalue(), filename, sub_folder)
+                            url = upload_to_cloudinary(buf.getvalue(), filename, num_receipts)
                             links.append((f"{filename}.jpg", url))
 
                 result_html = f"""
