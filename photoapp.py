@@ -196,14 +196,14 @@ if uploaded_file:
 
     if num_receipts == 1:
         st.markdown('<p class="preview-label">ใบเสร็จ 1 — ทั้งรูป</p>', unsafe_allow_html=True)
-        st.image(image, width=None)
+        st.image(image, use_container_width=True)
     else:
         cols = st.columns(num_receipts)
         for i in range(num_receipts):
             cropped = crop_image(image, i, num_receipts)
             with cols[i]:
                 st.markdown(f'<p class="preview-label">ใบเสร็จ {i+1}</p>', unsafe_allow_html=True)
-                st.image(cropped, width=None)
+                st.image(cropped, use_container_width=True)
 
     st.markdown('<hr class="divider">', unsafe_allow_html=True)
 
