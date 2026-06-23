@@ -133,10 +133,11 @@ def get_subfolder_id(service, num_receipts: int) -> str:
 
 
 def upload_image_to_drive(service, image_bytes: bytes, filename: str, folder_id: str) -> str:
-    media = MediaIoBaseUpload(io.BytesIO(image_bytes), mimetype="image/jpeg", resumable=True)
+    media = MediaIoBaseUpload(io.BytesIO(image_bytes), mimetype="image/jpeg", resumable=False)
     metadata = {"name": filename, "parents": [folder_id]}
     file = service.files().create(
-        body=metadata, media_body=media, fields="id, webViewLink"
+        body=metadata, media_body=media, fields="id, webViewLink",
+        supportsAllDrives=True
     ).execute()
     return file.get("webViewLink", "")
 
