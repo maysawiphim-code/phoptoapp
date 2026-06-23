@@ -195,11 +195,11 @@ def get_or_create_folder(service, folder_name: str, parent_id: str = None) -> st
 
 def get_subfolder_id(service, num_receipts: int) -> str:
     """คืน folder id ของโฟลเดอร์ย่อยตามจำนวนใบเสร็จ
-    โครงสร้าง: ใบเสร็จ/ → 1 ใบเสร็จ / 2 ใบเสร็จ / 3 ใบเสร็จ
+    โครงสร้าง: ใบเสร็จ (shared) → 1 ใบเสร็จ / 2 ใบเสร็จ / 3 ใบเสร็จ
     """
-    root_id = get_or_create_folder(service, "ใบเสร็จ")
+    ROOT_FOLDER_ID = "18SLmCOI2blX7OjsfoK230x49_c3x1kfi"
     sub_name = f"{num_receipts} ใบเสร็จ"
-    return get_or_create_folder(service, sub_name, parent_id=root_id)
+    return get_or_create_folder(service, sub_name, parent_id=ROOT_FOLDER_ID)
 
 
 def upload_image_to_drive(service, image_bytes: bytes, filename: str, folder_id: str, mime_type: str = "image/jpeg") -> str:
