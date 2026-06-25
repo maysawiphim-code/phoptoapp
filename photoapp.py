@@ -31,6 +31,22 @@ def setup_cloudinary():
         secure=True
     )
 
+def compress_image(file, max_side: int = 1600, quality: int = 82) -> tuple[bytes, int, int]:
+    """
+    ลดขนาดรูปให้ด้านยาวไม่เกิน max_side px แล้ว compress เป็น JPEG
+    คืน (bytes, new_width, new_height)
+    """
+    img = Image.open(file)
+    if img.mode in ("RGBA", "P"):
+        img = img.convert("RGB")
+    w, h = img.size
+    if max(w, h) > max_side:
+        scale = max_side / max(w, h)
+        img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=quality, optimize=True)
+    return buf.getvalue(), img.width, img.height
+
 def upload_to_cloudinary(image_bytes, filename, num_receipts):
     folder_map = {1: "1_ใบเสร็จ", 2: "2_ใบเสร็จ", 3: "3_ใบเสร็จ"}
     result = cloudinary.uploader.upload(
@@ -89,30 +105,35 @@ if uploaded_files:
 
             for idx, f in enumerate(uploaded_files):
                 try:
-                    img = Image.open(f)
-                    if img.mode in ("RGBA", "P"):
-                        img = img.convert("RGB")
-                    buf = io.BytesIO()
-                    img.save(buf, format="JPEG", quality=92)
+                    # ── compress: max 1600px ด้านยาว, quality 82 ──
+                    img_bytes, new_w, new_h = compress_image(f, max_side=1600, quality=82)
 
                     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                     fname = f"{safe_sender}_{ts}_{idx+1}"
-                    upload_to_cloudinary(buf.getvalue(), fname, num_receipts)
-                    results.append({"filename": fname, "ok": True})
+                    upload_to_cloudinary(img_bytes, fname, num_receipts)
+                    results.append({
+                        "filename": fname,
+                        "ok": True,
+                        "size_kb": round(len(img_bytes) / 1024),
+                        "dim": f"{new_w}×{new_h}",
+                    })
                 except Exception as e:
                     results.append({"filename": f.name, "ok": False, "err": str(e)})
 
                 prog.progress((idx+1)/len(uploaded_files), text=f"อัพโหลด {idx+1}/{len(uploaded_files)}...")
 
             prog.empty()
-            ok = [r for r in results if r["ok"]]
+            ok   = [r for r in results if r["ok"]]
             fail = [r for r in results if not r["ok"]]
 
             if ok:
-                lines = [f"<strong>✅ อัพโหลดสำเร็จ {len(ok)} รูป!</strong>"] + [f"📄 {r['filename']}.jpg" for r in ok]
+                lines = [f"<strong>✅ อัพโหลดสำเร็จ {len(ok)} รูป!</strong>"]
+                for r in ok:
+                    lines.append(f"📄 {r['filename']}.jpg &nbsp;·&nbsp; {r['dim']} px &nbsp;·&nbsp; {r['size_kb']} KB")
                 st.markdown(f'<div class="success-box">{"<br>".join(lines)}</div>', unsafe_allow_html=True)
             if fail:
-                lines = [f"<strong>❌ ไม่สำเร็จ {len(fail)} รูป</strong>"] + [f"• {r['filename']}: {r.get('err','')}" for r in fail]
+                lines = [f"<strong>❌ ไม่สำเร็จ {len(fail)} รูป</strong>"]
+                lines += [f"• {r['filename']}: {r.get('err','')}" for r in fail]
                 st.markdown(f'<div class="error-box">{"<br>".join(lines)}</div>', unsafe_allow_html=True)
 
 st.markdown('<hr class="divider">', unsafe_allow_html=True)
