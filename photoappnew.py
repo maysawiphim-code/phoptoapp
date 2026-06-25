@@ -3,7 +3,6 @@ import cloudinary
 import cloudinary.uploader
 import io
 import datetime
-import traceback
 from PIL import Image
 
 st.set_page_config(
@@ -50,23 +49,10 @@ st.markdown("""
         border-radius: 14px; padding: 1.2rem 1.5rem;
         color: #991b1b; margin-top: 1rem;
     }
-    .info-box {
-        background: #eff6ff; border: 2px solid #93c5fd;
-        border-radius: 14px; padding: 1rem 1.5rem;
-        color: #1e40af; margin-top: 0.5rem; font-size: 0.95rem;
-    }
     .divider { border: none; border-top: 1.5px solid #f3f4f6; margin: 1.5rem 0; }
-    .image-card {
-        border: 1.5px solid #e5e7eb;
-        border-radius: 12px;
-        padding: 0.75rem;
-        margin-bottom: 0.75rem;
-        background: #f9fafb;
-    }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Cloudinary setup ──────────────────────────────────────────────────────────
 @st.cache_resource
 def setup_cloudinary():
     cloudinary.config(
@@ -91,15 +77,6 @@ def upload_to_cloudinary(image_bytes: bytes, filename: str, num_receipts: int) -
 
 setup_cloudinary()
 
-# ── Session state init ────────────────────────────────────────────────────────
-if "queued_images" not in st.session_state:
-    st.session_state.queued_images = []   # list of {"pil": Image, "name": str}
-if "upload_results" not in st.session_state:
-    st.session_state.upload_results = []  # list of {"filename": str, "url": str, "ok": bool}
-if "file_uploader_key" not in st.session_state:
-    st.session_state.file_uploader_key = 0  # bump to reset the uploader widget
-
-# ── Header ────────────────────────────────────────────────────────────────────
 st.markdown("# 🧾 อัพโหลดใบเสร็จ")
 st.markdown(
     '<p class="subtitle">รูปจะถูกส่งเข้า Cloudinary โดยตรง · ปลอดภัย · ไม่มีการเก็บข้อมูล</p>',
@@ -107,7 +84,6 @@ st.markdown(
 )
 st.markdown('<hr class="divider">', unsafe_allow_html=True)
 
-# ── Mode & sender ─────────────────────────────────────────────────────────────
 st.markdown("#### 📋 เลือกจำนวนใบเสร็จในรูป")
 mode = st.radio(
     label="โหมด",
@@ -124,56 +100,34 @@ sender_name = st.text_input(
     label_visibility="collapsed",
 )
 
-# ── File uploader (reset key ทุกครั้งที่เพิ่มรูปสำเร็จ) ──────────────────────
 st.markdown('<hr class="divider">', unsafe_allow_html=True)
-st.markdown("#### 📷 เพิ่มรูปภาพ")
+st.markdown("#### 📷 เลือกรูปภาพ (เลือกได้หลายรูปพร้อมกัน)")
 
-uploaded_file = st.file_uploader(
-    "วางหรือเลือกไฟล์รูปภาพ (เพิ่มทีละรูปได้เรื่อย ๆ)",
+# accept_multiple_files=True → เลือกหลายไฟล์ได้ในครั้งเดียว
+uploaded_files = st.file_uploader(
+    "วางหรือเลือกไฟล์รูปภาพ",
     type=["jpg", "jpeg", "png", "webp"],
+    accept_multiple_files=True,
     label_visibility="collapsed",
-    key=f"uploader_{st.session_state.file_uploader_key}",
 )
 
-# ── "เพิ่มรูปนี้" button ──────────────────────────────────────────────────────
-if uploaded_file is not None:
-    image = Image.open(uploaded_file)
-    if image.mode in ("RGBA", "P"):
-        image = image.convert("RGB")
-
-    st.image(image, caption=f"ตัวอย่าง: {uploaded_file.name}", use_container_width=True)
-
-    if st.button("➕ เพิ่มรูปนี้เข้าคิว"):
-        st.session_state.queued_images.append(
-            {"pil": image, "name": uploaded_file.name}
-        )
-        # bump key → รีเซ็ต uploader widget ให้เลือกรูปใหม่ได้ทันที
-        st.session_state.file_uploader_key += 1
-        st.rerun()
-
-# ── แสดงคิวรูปที่รอ upload ───────────────────────────────────────────────────
-if st.session_state.queued_images:
+if uploaded_files:
     st.markdown('<hr class="divider">', unsafe_allow_html=True)
-    st.markdown(f"#### 🗂️ รูปในคิว ({len(st.session_state.queued_images)} รูป)")
+    st.markdown(f"#### 🔍 ตัวอย่างรูปที่เลือก ({len(uploaded_files)} รูป)")
 
+    # แสดง preview 3 คอลัมน์
     cols_per_row = 3
-    images = st.session_state.queued_images
-    for row_start in range(0, len(images), cols_per_row):
+    for row_start in range(0, len(uploaded_files), cols_per_row):
         cols = st.columns(cols_per_row)
-        for col_idx, img_data in enumerate(images[row_start: row_start + cols_per_row]):
-            global_idx = row_start + col_idx
+        for col_idx, f in enumerate(uploaded_files[row_start: row_start + cols_per_row]):
             with cols[col_idx]:
-                st.image(img_data["pil"], use_container_width=True)
-                st.caption(img_data["name"])
-                if st.button("🗑️ ลบ", key=f"del_{global_idx}"):
-                    st.session_state.queued_images.pop(global_idx)
-                    st.rerun()
+                img = Image.open(f)
+                st.image(img, caption=f.name, use_container_width=True)
 
-    st.info(f"พร้อมอัพโหลด {len(st.session_state.queued_images)} รูป → โฟลเดอร์ {num_receipts}_ใบเสร็จ")
-
+    st.info(f"จะบันทึกในโฟลเดอร์ {num_receipts}_ใบเสร็จ ทั้ง {len(uploaded_files)} รูป")
     st.markdown('<hr class="divider">', unsafe_allow_html=True)
 
-    if st.button(f"☁️ อัพโหลดทั้งหมด ({len(st.session_state.queued_images)} รูป)"):
+    if st.button(f"☁️ อัพโหลดทั้งหมด ({len(uploaded_files)} รูป)"):
         if not sender_name.strip():
             st.markdown(
                 '<div class="error-box">⚠️ กรุณากรอกชื่อผู้ส่งก่อนอัพโหลด</div>',
@@ -184,59 +138,50 @@ if st.session_state.queued_images:
             results = []
             progress = st.progress(0, text="กำลังอัพโหลด...")
 
-            for idx, img_data in enumerate(st.session_state.queued_images):
+            for idx, f in enumerate(uploaded_files):
                 try:
-                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:19]
+                    img = Image.open(f)
+                    if img.mode in ("RGBA", "P"):
+                        img = img.convert("RGB")
+
+                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                     filename = f"{safe_sender}_{timestamp}_{idx+1}"
 
                     buf = io.BytesIO()
-                    img_data["pil"].save(buf, format="JPEG", quality=92)
+                    img.save(buf, format="JPEG", quality=92)
 
                     url = upload_to_cloudinary(buf.getvalue(), filename, num_receipts)
                     results.append({"filename": filename, "url": url, "ok": True})
                 except Exception as e:
-                    results.append({"filename": img_data["name"], "url": "", "ok": False, "err": str(e)})
+                    results.append({"filename": f.name, "url": "", "ok": False, "err": str(e)})
 
-                progress.progress((idx + 1) / len(st.session_state.queued_images),
-                                   text=f"อัพโหลด {idx+1}/{len(st.session_state.queued_images)}...")
+                progress.progress(
+                    (idx + 1) / len(uploaded_files),
+                    text=f"อัพโหลด {idx+1}/{len(uploaded_files)}...",
+                )
 
             progress.empty()
-            st.session_state.upload_results = results
-            st.session_state.queued_images = []   # ล้างคิว
-            st.session_state.file_uploader_key += 1
-            st.rerun()
 
-# ── แสดงผลลัพธ์ ───────────────────────────────────────────────────────────────
-if st.session_state.upload_results:
-    st.markdown('<hr class="divider">', unsafe_allow_html=True)
-    st.markdown("#### ✅ ผลการอัพโหลด")
+            success = [r for r in results if r["ok"]]
+            failed  = [r for r in results if not r["ok"]]
 
-    success_count = sum(1 for r in st.session_state.upload_results if r["ok"])
-    fail_count = len(st.session_state.upload_results) - success_count
+            if success:
+                lines = [f"<strong>✅ อัพโหลดสำเร็จ {len(success)} รูป!</strong>"]
+                for r in success:
+                    lines.append(f"📄 {r['filename']}.jpg")
+                st.markdown(
+                    f'<div class="success-box">{"<br>".join(lines)}</div>',
+                    unsafe_allow_html=True,
+                )
 
-    if success_count:
-        lines = [f"<strong>✅ อัพโหลดสำเร็จ {success_count} รูป!</strong>"]
-        for r in st.session_state.upload_results:
-            if r["ok"]:
-                lines.append(f"📄 {r['filename']}.jpg")
-        st.markdown(
-            f'<div class="success-box">{"<br>".join(lines)}</div>',
-            unsafe_allow_html=True,
-        )
-
-    if fail_count:
-        lines = [f"<strong>❌ อัพโหลดไม่สำเร็จ {fail_count} รูป</strong>"]
-        for r in st.session_state.upload_results:
-            if not r["ok"]:
-                lines.append(f"• {r['filename']}: {r.get('err','unknown error')}")
-        st.markdown(
-            f'<div class="error-box">{"<br>".join(lines)}</div>',
-            unsafe_allow_html=True,
-        )
-
-    if st.button("🔄 เริ่มใหม่"):
-        st.session_state.upload_results = []
-        st.rerun()
+            if failed:
+                lines = [f"<strong>❌ อัพโหลดไม่สำเร็จ {len(failed)} รูป</strong>"]
+                for r in failed:
+                    lines.append(f"• {r['filename']}: {r.get('err','')}")
+                st.markdown(
+                    f'<div class="error-box">{"<br>".join(lines)}</div>',
+                    unsafe_allow_html=True,
+                )
 
 st.markdown('<hr class="divider">', unsafe_allow_html=True)
 st.markdown(
