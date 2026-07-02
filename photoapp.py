@@ -19,6 +19,7 @@ st.markdown("""
     .success-box { background: #f0fdf4; border: 2px solid #86efac; border-radius: 14px; padding: 1.2rem 1.5rem; color: #166534; margin-top: 1rem; }
     .error-box { background: #fef2f2; border: 2px solid #fca5a5; border-radius: 14px; padding: 1.2rem 1.5rem; color: #991b1b; margin-top: 1rem; }
     .divider { border: none; border-top: 1.5px solid #f3f4f6; margin: 1.5rem 0; }
+    .rotate-btn button { padding: 0.35rem 0.5rem !important; font-size: 0.85rem !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -31,14 +32,18 @@ def setup_cloudinary():
         secure=True
     )
 
-def compress_image(file, max_side: int = 1600, quality: int = 82) -> tuple[bytes, int, int]:
+def compress_image(file, max_side: int = 1600, quality: int = 82, rotation: int = 0) -> tuple[bytes, int, int]:
     """
     ลดขนาดรูปให้ด้านยาวไม่เกิน max_side px แล้ว compress เป็น JPEG
     คืน (bytes, new_width, new_height)
+    rotation: องศาที่ต้องการหมุน (ตามเข็มนาฬิกา) เช่น 90, 180, 270
     """
     img = Image.open(file)
     if img.mode in ("RGBA", "P"):
         img = img.convert("RGB")
+    if rotation:
+        # PIL rotate หมุนทวนเข็ม ดังนั้นใส่ค่าลบเพื่อให้หมุนตามเข็ม
+        img = img.rotate(-rotation, expand=True)
     w, h = img.size
     if max(w, h) > max_side:
         scale = max_side / max(w, h)
@@ -83,14 +88,37 @@ uploaded_files = st.file_uploader(
     label_visibility="collapsed",
 )
 
+# เก็บองศาที่หมุนของแต่ละรูป (key = ชื่อไฟล์ + ขนาดไฟล์ เพื่อกันชนกันเวลาไฟล์ชื่อซ้ำ)
+if "rotations" not in st.session_state:
+    st.session_state.rotations = {}
+
 if uploaded_files:
     st.markdown('<hr class="divider">', unsafe_allow_html=True)
     st.markdown(f"#### 🔍 รูปที่เลือก ({len(uploaded_files)} รูป)")
 
     cols = st.columns(3)
     for i, f in enumerate(uploaded_files):
+        file_key = f"{f.name}_{f.size}"
+        if file_key not in st.session_state.rotations:
+            st.session_state.rotations[file_key] = 0
+
         with cols[i % 3]:
-            st.image(f, caption=f.name, use_container_width=True)
+            rotation = st.session_state.rotations[file_key]
+
+            # แสดงภาพ preview ที่หมุนแล้ว (ไม่ยุ่งกับไฟล์ต้นฉบับ)
+            img_preview = Image.open(f)
+            if img_preview.mode in ("RGBA", "P"):
+                img_preview = img_preview.convert("RGB")
+            if rotation:
+                img_preview = img_preview.rotate(-rotation, expand=True)
+
+            st.image(img_preview, caption=f.name, use_container_width=True)
+
+            st.markdown('<div class="rotate-btn">', unsafe_allow_html=True)
+            if st.button("🔄 หมุน 90°", key=f"rotate_{file_key}_{i}"):
+                st.session_state.rotations[file_key] = (rotation + 90) % 360
+                st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
 
     st.info(f"จะบันทึกในโฟลเดอร์ {num_receipts}_ใบเสร็จ ทั้ง {len(uploaded_files)} รูป")
     st.markdown('<hr class="divider">', unsafe_allow_html=True)
@@ -105,8 +133,11 @@ if uploaded_files:
 
             for idx, f in enumerate(uploaded_files):
                 try:
-                    # ── compress: max 1600px ด้านยาว, quality 82 ──
-                    img_bytes, new_w, new_h = compress_image(f, max_side=1600, quality=82)
+                    file_key = f"{f.name}_{f.size}"
+                    rotation = st.session_state.rotations.get(file_key, 0)
+
+                    # ── compress: max 1600px ด้านยาว, quality 82, หมุนตามที่ตั้งค่า ──
+                    img_bytes, new_w, new_h = compress_image(f, max_side=1600, quality=82, rotation=rotation)
 
                     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                     fname = f"{safe_sender}_{ts}_{idx+1}"
