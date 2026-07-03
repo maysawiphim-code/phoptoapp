@@ -4,6 +4,8 @@ import cloudinary.uploader
 import io
 import datetime
 from PIL import Image
+import gspread
+from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="อัพโหลดใบเสร็จ", page_icon="🧾", layout="centered")
 
@@ -31,6 +33,60 @@ def setup_cloudinary():
         api_secret=st.secrets["cloudinary"]["api_secret"],
         secure=True
     )
+
+@st.cache_resource
+def setup_gsheet():
+    """
+    เชื่อมต่อ Google Sheets ผ่าน Service Account
+    ต้องตั้งค่าใน .streamlit/secrets.toml แบบนี้:
+
+    [gcp_service_account]
+    type = "service_account"
+    project_id = "..."
+    private_key_id = "..."
+    private_key = "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+    client_email = "...@....iam.gserviceaccount.com"
+    client_id = "..."
+    token_uri = "https://oauth2.googleapis.com/token"
+
+    [gsheet]
+    sheet_id = "GOOGLE_SHEET_ID_ตรงนี้"
+    worksheet_name = "Log"
+
+    และอย่าลืม "แชร์" Google Sheet ให้กับอีเมลใน client_email (สิทธิ์ Editor)
+    """
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ]
+    creds = Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"], scopes=scopes
+    )
+    client = gspread.authorize(creds)
+    sh = client.open_by_key(st.secrets["gsheet"]["sheet_id"])
+    ws_name = st.secrets["gsheet"].get("worksheet_name", "Log")
+    try:
+        ws = sh.worksheet(ws_name)
+    except gspread.exceptions.WorksheetNotFound:
+        ws = sh.add_worksheet(title=ws_name, rows=1000, cols=10)
+        ws.append_row(["วันที่-เวลา", "ผู้ส่ง", "ชื่อไฟล์", "จำนวนใบเสร็จ", "ขนาด (KB)", "ขนาดภาพ (px)", "ลิงก์รูป"])
+    return ws
+
+def log_to_gsheet(sender_name, filename, num_receipts, size_kb, dim, url):
+    try:
+        ws = setup_gsheet()
+        ws.append_row([
+            datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            sender_name,
+            filename,
+            num_receipts,
+            size_kb,
+            dim,
+            url,
+        ])
+        return True, ""
+    except Exception as e:
+        return False, str(e)
 
 def compress_image(file, max_side: int = 1600, quality: int = 82, rotation: int = 0) -> tuple[bytes, int, int]:
     """
@@ -129,6 +185,7 @@ if uploaded_files:
         else:
             safe_sender = sender_name.strip().replace("/", "-").replace("\\", "-")
             results = []
+            log_errors = []
             prog = st.progress(0, text="กำลังอัพโหลด...")
 
             for idx, f in enumerate(uploaded_files):
@@ -141,13 +198,24 @@ if uploaded_files:
 
                     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                     fname = f"{safe_sender}_{ts}_{idx+1}"
-                    upload_to_cloudinary(img_bytes, fname, num_receipts)
+                    url = upload_to_cloudinary(img_bytes, fname, num_receipts)
+                    size_kb = round(len(img_bytes) / 1024)
+                    dim = f"{new_w}×{new_h}"
+
                     results.append({
                         "filename": fname,
                         "ok": True,
-                        "size_kb": round(len(img_bytes) / 1024),
-                        "dim": f"{new_w}×{new_h}",
+                        "size_kb": size_kb,
+                        "dim": dim,
                     })
+
+                    # ── บันทึกลง Google Sheet ──
+                    log_ok, log_err = log_to_gsheet(
+                        sender_name.strip(), fname, num_receipts, size_kb, dim, url
+                    )
+                    if not log_ok:
+                        log_errors.append(f"{fname}: {log_err}")
+
                 except Exception as e:
                     results.append({"filename": f.name, "ok": False, "err": str(e)})
 
@@ -166,6 +234,8 @@ if uploaded_files:
                 lines = [f"<strong>❌ ไม่สำเร็จ {len(fail)} รูป</strong>"]
                 lines += [f"• {r['filename']}: {r.get('err','')}" for r in fail]
                 st.markdown(f'<div class="error-box">{"<br>".join(lines)}</div>', unsafe_allow_html=True)
+            if log_errors:
+                st.warning("⚠️ อัพโหลดรูปสำเร็จ แต่บันทึกลง Google Sheet ไม่สำเร็จบางรายการ:\n" + "\n".join(log_errors))
 
 st.markdown('<hr class="divider">', unsafe_allow_html=True)
 st.markdown('<p style="text-align:center;color:#d1d5db;font-size:0.8rem;">รูปทั้งหมดจะถูกส่งเข้าบัญชี Cloudinary ของเจ้าของระบบเท่านั้น</p>', unsafe_allow_html=True)
