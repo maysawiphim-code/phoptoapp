@@ -12,6 +12,19 @@ st.set_page_config(page_title="อัพโหลดใบเสร็จ", page
 # ── ชีตรายชื่อผู้ส่ง (autocomplete) ──
 # ต้องแชร์ชีตนี้ให้ service account (client_email) ด้วย อย่างน้อยสิทธิ์ Editor
 NAME_SHEET_ID = "1P1RVAJy-1tqHGMR2MyhM-DmAlTUDyrI8f71Qaf0Moko"
+# ชื่อแท็บที่เก็บรายชื่อ — ถ้าไม่มีแท็บนี้ ระบบจะสร้างให้เอง
+NAME_WORKSHEET = "รายชื่อ"
+
+def get_name_worksheet():
+    """เปิดแท็บรายชื่อ ถ้าไม่มีจะสร้างใหม่พร้อมหัวตาราง"""
+    client = get_gspread_client()
+    sh = client.open_by_key(NAME_SHEET_ID)
+    try:
+        return sh.worksheet(NAME_WORKSHEET)
+    except gspread.exceptions.WorksheetNotFound:
+        ws = sh.add_worksheet(title=NAME_WORKSHEET, rows=1000, cols=2)
+        ws.append_row(["ชื่อผู้ส่ง"])
+        return ws
 
 st.markdown("""
 <style>
@@ -86,14 +99,13 @@ def setup_gsheet():
 @st.cache_data(ttl=120, show_spinner=False)
 def load_sender_names() -> list[str]:
     """
-    ดึงรายชื่อจากชีตรายชื่อ (NAME_SHEET_ID) แท็บแรก
+    ดึงรายชื่อจากชีตรายชื่อ (NAME_SHEET_ID) แท็บ NAME_WORKSHEET
     - ถ้ามีหัวคอลัมน์ชื่อ "ผู้ส่ง" หรือ "ชื่อ" จะใช้คอลัมน์นั้น
     - ถ้าไม่มี จะใช้คอลัมน์แรก (ข้ามหัวตารางถ้าดูเหมือนหัวตาราง)
     cache 2 นาที — ชื่อที่เพิ่มใหม่ในชีตจะโผล่มาเองภายใน 2 นาที
     """
     try:
-        client = get_gspread_client()
-        ws = client.open_by_key(NAME_SHEET_ID).get_worksheet(0)
+        ws = get_name_worksheet()
         rows = ws.get_all_values()
         if not rows:
             return []
@@ -126,8 +138,7 @@ def load_sender_names() -> list[str]:
 def add_sender_name_to_sheet(name: str):
     """ถ้าเป็นชื่อใหม่ (พิมพ์เอง ไม่ได้เลือกจากรายการ) ให้บันทึกเพิ่มลงชีตรายชื่อ"""
     try:
-        client = get_gspread_client()
-        ws = client.open_by_key(NAME_SHEET_ID).get_worksheet(0)
+        ws = get_name_worksheet()
         ws.append_row([name])
         load_sender_names.clear()  # ล้าง cache ให้รายชื่อล่าสุดโผล่ทันที
     except Exception:
