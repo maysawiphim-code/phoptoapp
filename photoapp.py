@@ -9,6 +9,10 @@ from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="อัพโหลดใบเสร็จ", page_icon="🧾", layout="centered")
 
+# ── ชีตรายชื่อผู้ส่ง (autocomplete) ──
+# ต้องแชร์ชีตนี้ให้ service account (client_email) ด้วย อย่างน้อยสิทธิ์ Editor
+NAME_SHEET_ID = "1P1RVAJy-1tqHGMR2MyhM-DmAlTUDyrI8f71Qaf0Moko"
+
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600;700&display=swap');
@@ -35,9 +39,20 @@ def setup_cloudinary():
     )
 
 @st.cache_resource
+def get_gspread_client():
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ]
+    creds = Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"], scopes=scopes
+    )
+    return gspread.authorize(creds)
+
+@st.cache_resource
 def setup_gsheet():
     """
-    เชื่อมต่อ Google Sheets ผ่าน Service Account
+    เชื่อมต่อ Google Sheets (Log) ผ่าน Service Account
     ต้องตั้งค่าใน .streamlit/secrets.toml แบบนี้:
 
     [gcp_service_account]
@@ -55,14 +70,7 @@ def setup_gsheet():
 
     และอย่าลืม "แชร์" Google Sheet ให้กับอีเมลใน client_email (สิทธิ์ Editor)
     """
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive",
-    ]
-    creds = Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"], scopes=scopes
-    )
-    client = gspread.authorize(creds)
+    client = get_gspread_client()
     sh = client.open_by_key(st.secrets["gsheet"]["sheet_id"])
     ws_name = st.secrets["gsheet"].get("worksheet_name", "Log")
     try:
@@ -71,6 +79,59 @@ def setup_gsheet():
         ws = sh.add_worksheet(title=ws_name, rows=1000, cols=10)
         ws.append_row(["วันที่-เวลา", "ผู้ส่ง", "ชื่อไฟล์", "จำนวนใบเสร็จ", "ขนาด (KB)", "ขนาดภาพ (px)", "ลิงก์รูป"])
     return ws
+
+# ─────────────────────────────────────────────
+#  รายชื่อผู้ส่ง (ดึงจากชีตรายชื่อ → ใช้ autocomplete)
+# ─────────────────────────────────────────────
+@st.cache_data(ttl=120, show_spinner=False)
+def load_sender_names() -> list[str]:
+    """
+    ดึงรายชื่อจากชีตรายชื่อ (NAME_SHEET_ID) แท็บแรก
+    - ถ้ามีหัวคอลัมน์ชื่อ "ผู้ส่ง" หรือ "ชื่อ" จะใช้คอลัมน์นั้น
+    - ถ้าไม่มี จะใช้คอลัมน์แรก (ข้ามหัวตารางถ้าดูเหมือนหัวตาราง)
+    cache 2 นาที — ชื่อที่เพิ่มใหม่ในชีตจะโผล่มาเองภายใน 2 นาที
+    """
+    try:
+        client = get_gspread_client()
+        ws = client.open_by_key(NAME_SHEET_ID).get_worksheet(0)
+        rows = ws.get_all_values()
+        if not rows:
+            return []
+
+        header = [c.strip() for c in rows[0]]
+        col_idx = None
+        for key in ("ผู้ส่ง", "ชื่อผู้ส่ง", "ชื่อ", "name", "Name"):
+            if key in header:
+                col_idx = header.index(key)
+                break
+
+        if col_idx is not None:
+            values = [r[col_idx] for r in rows[1:] if len(r) > col_idx]
+        else:
+            # ใช้คอลัมน์แรก; ถ้าแถวแรกดูเป็นหัวตาราง (มีคำว่า ชื่อ/ผู้ส่ง) ให้ข้าม
+            start = 1 if any(k in header[0] for k in ("ชื่อ", "ผู้ส่ง", "name", "Name")) else 0
+            values = [r[0] for r in rows[start:] if r and r[0]]
+
+        # ตัดช่องว่าง + ตัดค่าซ้ำ (คงลำดับเดิม)
+        seen, names = set(), []
+        for v in values:
+            v = v.strip()
+            if v and v not in seen:
+                seen.add(v)
+                names.append(v)
+        return names
+    except Exception:
+        return []
+
+def add_sender_name_to_sheet(name: str):
+    """ถ้าเป็นชื่อใหม่ (พิมพ์เอง ไม่ได้เลือกจากรายการ) ให้บันทึกเพิ่มลงชีตรายชื่อ"""
+    try:
+        client = get_gspread_client()
+        ws = client.open_by_key(NAME_SHEET_ID).get_worksheet(0)
+        ws.append_row([name])
+        load_sender_names.clear()  # ล้าง cache ให้รายชื่อล่าสุดโผล่ทันที
+    except Exception:
+        pass  # เพิ่มชื่อไม่สำเร็จ ไม่ต้อง block การอัพโหลด
 
 def log_to_gsheet(sender_name, filename, num_receipts, size_kb, dim, url):
     try:
@@ -131,7 +192,23 @@ num_receipts = int(mode[0])
 
 st.markdown('<hr class="divider">', unsafe_allow_html=True)
 st.markdown("#### 👤 ชื่อผู้ส่ง")
-sender_name = st.text_input("ชื่อผู้ส่ง", placeholder="เช่น สมชาย, ฝ่ายบัญชี ...", label_visibility="collapsed")
+
+sender_options = load_sender_names()
+
+# selectbox แบบพิมพ์ค้นหาได้: พิมพ์ขึ้นต้นแล้วรายชื่อจากชีตจะโผล่ให้เลือกทันที
+# accept_new_options=True = ถ้าไม่มีชื่อในรายการ ก็พิมพ์ชื่อใหม่ได้เลย (ต้องใช้ Streamlit >= 1.45)
+sender_name = st.selectbox(
+    "ชื่อผู้ส่ง",
+    options=sender_options,
+    index=None,
+    placeholder="พิมพ์ชื่อเพื่อค้นหา หรือพิมพ์ชื่อใหม่... เช่น สมชาย, ฝ่ายบัญชี",
+    accept_new_options=True,
+    label_visibility="collapsed",
+)
+sender_name = (sender_name or "").strip()
+
+if not sender_options:
+    st.caption("⚠️ ยังโหลดรายชื่อจากชีตไม่ได้ — เช็คว่าแชร์ชีตรายชื่อให้ service account แล้ว (ยังพิมพ์ชื่อเองได้ตามปกติ)")
 
 st.markdown('<hr class="divider">', unsafe_allow_html=True)
 st.markdown("#### 📷 เลือกรูปภาพ (เลือกได้หลายรูปพร้อมกัน)")
@@ -180,10 +257,10 @@ if uploaded_files:
     st.markdown('<hr class="divider">', unsafe_allow_html=True)
 
     if st.button(f"☁️ อัพโหลดทั้งหมด ({len(uploaded_files)} รูป)"):
-        if not sender_name.strip():
-            st.markdown('<div class="error-box">⚠️ กรุณากรอกชื่อผู้ส่งก่อนอัพโหลด</div>', unsafe_allow_html=True)
+        if not sender_name:
+            st.markdown('<div class="error-box">⚠️ กรุณาเลือกหรือกรอกชื่อผู้ส่งก่อนอัพโหลด</div>', unsafe_allow_html=True)
         else:
-            safe_sender = sender_name.strip().replace("/", "-").replace("\\", "-")
+            safe_sender = sender_name.replace("/", "-").replace("\\", "-")
             results = []
             log_errors = []
             prog = st.progress(0, text="กำลังอัพโหลด...")
@@ -211,7 +288,7 @@ if uploaded_files:
 
                     # ── บันทึกลง Google Sheet ──
                     log_ok, log_err = log_to_gsheet(
-                        sender_name.strip(), fname, num_receipts, size_kb, dim, url
+                        sender_name, fname, num_receipts, size_kb, dim, url
                     )
                     if not log_ok:
                         log_errors.append(f"{fname}: {log_err}")
@@ -222,6 +299,11 @@ if uploaded_files:
                 prog.progress((idx+1)/len(uploaded_files), text=f"อัพโหลด {idx+1}/{len(uploaded_files)}...")
 
             prog.empty()
+
+            # ── ถ้าเป็นชื่อใหม่ที่ไม่อยู่ในชีตรายชื่อ ให้เพิ่มเข้าไปอัตโนมัติ ──
+            if sender_name and sender_name not in sender_options:
+                add_sender_name_to_sheet(sender_name)
+
             ok   = [r for r in results if r["ok"]]
             fail = [r for r in results if not r["ok"]]
 
