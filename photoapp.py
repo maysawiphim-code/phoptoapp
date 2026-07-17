@@ -10,8 +10,8 @@ from google.oauth2.service_account import Credentials
 st.set_page_config(page_title="อัพโหลดใบเสร็จ", page_icon="🧾", layout="centered")
 
 # ── ชีตรายชื่อผู้ส่ง (autocomplete) ──
-# ต้องแชร์ชีตนี้ให้ service account (client_email) ด้วย อย่างน้อยสิทธิ์ Editor
-NAME_SHEET_ID = "1P1RVAJy-1tqHGMR2MyhM-DmAlTUDyrI8f71Qaf0Moko"
+# ใช้ชีตเดิม (photoapp) แท็บ "รายชื่อ" — หัวตารางคอลัมน์ A คือ "ชื่อ"
+NAME_SHEET_ID = "1DSofofTdnu-cWn3j8txxHuUuGd8qakA2Z4c4CalmQxE"
 # ชื่อแท็บที่เก็บรายชื่อ — ถ้าไม่มีแท็บนี้ ระบบจะสร้างให้เอง
 NAME_WORKSHEET = "รายชื่อ"
 
